@@ -216,11 +216,6 @@ body {
   accent-color: var(--accent);
 }
 
-.setting-range:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .setting-text {
   font: inherit;
   font-size: 13px;

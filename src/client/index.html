@@ -39,10 +39,10 @@
         </div>
         <div class="setting-item">
           <div class="setting-label">
-            <span>Temperature</span>
-            <span class="setting-hint">fixed at 1 (model limit)</span>
+            <span>Temperature <span class="setting-hint">(1.0 = thinking on)</span></span>
+            <span id="tempVal" class="setting-val">1.00</span>
           </div>
-          <input type="range" id="temperature" class="setting-range" min="0" max="1" step="0.05" value="1" disabled title="claude-opus-4-8 does not support changing temperature">
+          <input type="range" id="temperature" class="setting-range" min="0" max="1" step="0.05" value="1">
         </div>
         <div class="setting-item setting-item--wide">
           <div class="setting-label">

@@ -16,6 +16,7 @@ interface ChatMessage {
 
 interface ChatSettings {
   maxTokens?: number;
+  temperature?: number;
   stopSequences?: string[];
 }
 
@@ -44,12 +45,18 @@ app.post('/api/chat', async (req, res) => {
     console.log(`[chat] request — ${messages.length} message(s)`);
 
     const maxTokens = Math.min(Math.max(Math.round(settings.maxTokens ?? 16000), 1), 16000);
+    const temperature = (settings.temperature !== undefined)
+      ? Math.min(Math.max(settings.temperature, 0), 1)
+      : 1;
     const stopSequences = (settings.stopSequences ?? []).filter(s => s.length > 0);
+    // Thinking requires temperature === 1; when user lowers temperature, disable thinking
+    const useThinking = temperature === 1;
 
     const stream = client.messages.stream({
-      model: 'claude-opus-4-8',
+      model: 'claude-sonnet-4-6',
       max_tokens: maxTokens,
-      thinking: { type: 'adaptive' },
+      ...(useThinking && { thinking: { type: 'adaptive' } }),
+      ...(!useThinking && { temperature }),
       ...(stopSequences.length > 0 && { stop_sequences: stopSequences }),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     });

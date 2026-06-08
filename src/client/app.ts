@@ -5,6 +5,7 @@ interface Message {
 
 interface Settings {
   maxTokens: number;
+  temperature: number;
   stopSequences: string[];
 }
 
@@ -82,6 +83,10 @@ class Chat {
       this.maxTokensValEl.textContent = this.maxTokensEl.value;
     });
 
+    this.temperatureEl.addEventListener('input', () => {
+      this.tempValEl.textContent = parseFloat(this.temperatureEl.value).toFixed(2);
+    });
+
   }
 
   private toggleSettings() {
@@ -93,6 +98,7 @@ class Chat {
   private getSettings(): Settings {
     return {
       maxTokens: parseInt(this.maxTokensEl.value, 10),
+      temperature: parseFloat(this.temperatureEl.value),
       stopSequences: this.stopSeqsEl.value
         .split(',')
         .map(s => s.trim())
