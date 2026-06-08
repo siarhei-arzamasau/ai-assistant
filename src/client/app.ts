@@ -3,6 +3,11 @@ interface Message {
   content: string;
 }
 
+interface Settings {
+  maxTokens: number;
+  stopSequences: string[];
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -47,6 +52,14 @@ class Chat {
   private sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
   private clearBtn = document.getElementById('clearBtn') as HTMLButtonElement;
 
+  private settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
+  private settingsPanel = document.getElementById('settingsPanel') as HTMLDivElement;
+  private maxTokensEl = document.getElementById('maxTokens') as HTMLInputElement;
+  private maxTokensValEl = document.getElementById('maxTokensVal') as HTMLSpanElement;
+  private temperatureEl = document.getElementById('temperature') as HTMLInputElement;
+  private tempValEl = document.getElementById('tempVal') as HTMLSpanElement;
+  private stopSeqsEl = document.getElementById('stopSeqs') as HTMLInputElement;
+
   constructor() {
     this.sendBtn.addEventListener('click', () => this.send());
     this.clearBtn.addEventListener('click', () => this.clear());
@@ -62,6 +75,29 @@ class Chat {
       this.autoResize();
       this.syncSendBtn();
     });
+
+    this.settingsBtn.addEventListener('click', () => this.toggleSettings());
+
+    this.maxTokensEl.addEventListener('input', () => {
+      this.maxTokensValEl.textContent = this.maxTokensEl.value;
+    });
+
+  }
+
+  private toggleSettings() {
+    const open = this.settingsPanel.classList.toggle('open');
+    this.settingsBtn.classList.toggle('active', open);
+    this.settingsBtn.setAttribute('aria-expanded', String(open));
+  }
+
+  private getSettings(): Settings {
+    return {
+      maxTokens: parseInt(this.maxTokensEl.value, 10),
+      stopSequences: this.stopSeqsEl.value
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0),
+    };
   }
 
   private autoResize() {
@@ -143,7 +179,7 @@ class Chat {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: this.history }),
+        body: JSON.stringify({ messages: this.history, settings: this.getSettings() }),
       });
 
       if (!res.ok) {

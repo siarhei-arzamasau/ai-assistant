@@ -14,8 +14,13 @@ interface ChatMessage {
   content: string;
 }
 
+interface ChatSettings {
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+
 app.post('/api/chat', async (req, res) => {
-  const { messages } = req.body as { messages: ChatMessage[] };
+  const { messages, settings = {} } = req.body as { messages: ChatMessage[]; settings?: ChatSettings };
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'Invalid messages format' });
@@ -38,10 +43,14 @@ app.post('/api/chat', async (req, res) => {
   try {
     console.log(`[chat] request — ${messages.length} message(s)`);
 
+    const maxTokens = Math.min(Math.max(Math.round(settings.maxTokens ?? 16000), 1), 16000);
+    const stopSequences = (settings.stopSequences ?? []).filter(s => s.length > 0);
+
     const stream = client.messages.stream({
       model: 'claude-opus-4-8',
-      max_tokens: 16000,
+      max_tokens: maxTokens,
       thinking: { type: 'adaptive' },
+      ...(stopSequences.length > 0 && { stop_sequences: stopSequences }),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     });
 
