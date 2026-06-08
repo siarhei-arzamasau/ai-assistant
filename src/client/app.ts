@@ -4,6 +4,7 @@ interface Message {
 }
 
 interface Settings {
+  model: string;
   maxTokens: number;
   temperature: number;
   stopSequences: string[];
@@ -55,10 +56,12 @@ class Chat {
 
   private settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
   private settingsPanel = document.getElementById('settingsPanel') as HTMLDivElement;
+  private modelEl = document.getElementById('modelSelect') as HTMLSelectElement;
   private maxTokensEl = document.getElementById('maxTokens') as HTMLInputElement;
   private maxTokensValEl = document.getElementById('maxTokensVal') as HTMLSpanElement;
   private temperatureEl = document.getElementById('temperature') as HTMLInputElement;
   private tempValEl = document.getElementById('tempVal') as HTMLSpanElement;
+  private tempHintEl = document.getElementById('tempHint') as HTMLDivElement;
   private stopSeqsEl = document.getElementById('stopSeqs') as HTMLInputElement;
 
   constructor() {
@@ -78,6 +81,7 @@ class Chat {
     });
 
     this.settingsBtn.addEventListener('click', () => this.toggleSettings());
+    this.modelEl.addEventListener('change', () => this.onModelChange());
 
     this.maxTokensEl.addEventListener('input', () => {
       this.maxTokensValEl.textContent = this.maxTokensEl.value;
@@ -95,8 +99,26 @@ class Chat {
     this.settingsBtn.setAttribute('aria-expanded', String(open));
   }
 
+  private onModelChange() {
+    const model = this.modelEl.value;
+    const isOpus  = model === 'claude-opus-4-8';
+    const isHaiku = model === 'claude-haiku-4-5-20251001';
+
+    this.temperatureEl.disabled = isOpus;
+    if (isOpus) {
+      this.temperatureEl.value = '1';
+      this.tempValEl.textContent = '1.00';
+      this.tempHintEl.textContent = 'n/a — temperature not supported';
+    } else if (isHaiku) {
+      this.tempHintEl.textContent = 'thinking not available on Haiku';
+    } else {
+      this.tempHintEl.textContent = '1.0 = thinking on';
+    }
+  }
+
   private getSettings(): Settings {
     return {
+      model: this.modelEl.value,
       maxTokens: parseInt(this.maxTokensEl.value, 10),
       temperature: parseFloat(this.temperatureEl.value),
       stopSequences: this.stopSeqsEl.value
@@ -180,6 +202,8 @@ class Chat {
     assistantBubble.classList.add('streaming');
 
     let accumulated = '';
+    let usage: { input: number; output: number } | null = null;
+    const startTime = Date.now();
 
     try {
       const res = await fetch('/api/chat', {
@@ -210,7 +234,7 @@ class Chat {
           const payload = line.slice(6);
           if (payload === '[DONE]') continue;
 
-          let parsed: { text?: string; error?: string; thinking?: boolean };
+          let parsed: { text?: string; error?: string; thinking?: boolean; usage?: { input: number; output: number } };
           try {
             parsed = JSON.parse(payload);
           } catch {
@@ -218,6 +242,7 @@ class Chat {
           }
 
           if (parsed.error) throw new Error(parsed.error);
+          if (parsed.usage) usage = parsed.usage;
 
           if (parsed.thinking === true && !accumulated) {
             assistantBubble.setAttribute('data-thinking', '1');
@@ -243,6 +268,13 @@ class Chat {
       assistantBubble.classList.add('error');
       this.history.pop(); // remove user message that failed
     } finally {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+      const timeEl = document.createElement('div');
+      timeEl.className = 'bubble-time';
+      const tokenPart = usage ? ` · ${usage.input} in / ${usage.output} out tokens` : '';
+      timeEl.textContent = `${elapsed}s${tokenPart}`;
+      assistantBubble.appendChild(timeEl);
+
       assistantBubble.classList.remove('streaming');
       this.setStreaming(false);
       this.inputEl.focus();

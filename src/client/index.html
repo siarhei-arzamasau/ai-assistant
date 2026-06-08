@@ -30,6 +30,14 @@
 
     <div id="settingsPanel" class="settings-panel">
       <div class="settings-inner">
+        <div class="setting-item setting-item--model">
+          <div class="setting-label"><span>Model</span></div>
+          <select id="modelSelect" class="setting-select">
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+            <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6</option>
+            <option value="claude-opus-4-8">Claude Opus 4.8</option>
+          </select>
+        </div>
         <div class="setting-item">
           <div class="setting-label">
             <span>Max tokens</span>
@@ -39,10 +47,11 @@
         </div>
         <div class="setting-item">
           <div class="setting-label">
-            <span>Temperature <span class="setting-hint">(1.0 = thinking on)</span></span>
+            <span>Temperature</span>
             <span id="tempVal" class="setting-val">1.00</span>
           </div>
           <input type="range" id="temperature" class="setting-range" min="0" max="1" step="0.05" value="1">
+          <div id="tempHint" class="setting-hint setting-hint--below">1.0 = thinking on</div>
         </div>
         <div class="setting-item setting-item--wide">
           <div class="setting-label">
