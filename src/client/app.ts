@@ -64,18 +64,13 @@ function formatDate(iso: string): string {
 }
 
 class Chat {
-  private contextHistory: Message[] = []; // all previous sessions — sent to API, not displayed
+  private contextSummary = ''; // system prompt built from summaries of previous sessions
   private history: Message[] = [];        // current session — displayed and saved
   private sessionId: string | null = null;
   private streaming = false;
 
   private lastInputTokens = 0;   // input tokens from the previous request in this session
   private sessionOutputTokens = 0; // accumulated output tokens for this session
-
-  // What gets sent to Claude — full context + current session
-  private get apiMessages(): Message[] {
-    return [...this.contextHistory, ...this.history];
-  }
 
   private messagesEl = document.getElementById('messages') as HTMLDivElement;
   private welcomeEl = document.getElementById('welcome') as HTMLDivElement;
@@ -139,9 +134,10 @@ class Chat {
     try {
       const url = excludeId ? `/api/history?exclude=${excludeId}` : '/api/history';
       const res = await fetch(url);
-      this.contextHistory = await res.json();
+      const data = await res.json();
+      this.contextSummary = data.system ?? '';
     } catch {
-      this.contextHistory = [];
+      this.contextSummary = '';
     }
   }
 
@@ -206,7 +202,7 @@ class Chat {
     this.lastInputTokens = 0;
     this.sessionOutputTokens = 0;
     this.updateSessionStats();
-    await this.loadContext(); // reload so just-saved session is included as context
+    await this.loadContext(); // reload — now picks up the just-generated summary
     this.renderHistory();
     await this.refreshSessionList();
     this.inputEl.focus();
@@ -407,7 +403,11 @@ class Chat {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: this.apiMessages, settings: this.getSettings() }),
+        body: JSON.stringify({
+          messages: this.history,
+          settings: this.getSettings(),
+          ...(this.contextSummary && { system: this.contextSummary }),
+        }),
       });
 
       if (!res.ok) {
@@ -461,6 +461,9 @@ class Chat {
       this.history.push({ role: 'assistant', content: accumulated });
       assistantBubble.innerHTML = renderMarkdown(accumulated);
       await this.saveSession();
+      if (this.sessionId && (this.history.length / 2) % 3 === 0) {
+        fetch(`/api/sessions/${this.sessionId}/summarize`, { method: 'POST' }).catch(() => {});
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unexpected error';
       assistantBubble.textContent = msg;
