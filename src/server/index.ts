@@ -7,15 +7,28 @@ const app = express();
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(process.cwd(), 'dist/public')));
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
+const ALLOWED_MODELS = new Set([
+  'claude-haiku-4-5-20251001',
+  'claude-sonnet-4-6',
+  'claude-opus-4-8',
+]);
+
+interface ChatSettings {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  stopSequences?: string[];
+}
+
 app.post('/api/chat', async (req, res) => {
-  const { messages } = req.body as { messages: ChatMessage[] };
+  const { messages, settings = {} } = req.body as { messages: ChatMessage[]; settings?: ChatSettings };
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'Invalid messages format' });
@@ -36,19 +49,42 @@ app.post('/api/chat', async (req, res) => {
   }, 15000);
 
   try {
-    console.log(`[chat] request — ${messages.length} message(s)`);
+    const model = ALLOWED_MODELS.has(settings.model ?? '') ? settings.model! : 'claude-sonnet-4-6';
+    const isOpus  = model === 'claude-opus-4-8';
+    const isHaiku = model === 'claude-haiku-4-5-20251001';
+
+    console.log(`[chat] request — ${messages.length} message(s), model=${model}`);
+
+    const maxTokens = Math.min(Math.max(Math.round(settings.maxTokens ?? 16000), 1), 16000);
+    // Opus: temperature deprecated — always use default (1). Others: honour the setting.
+    const temperature = isOpus ? 1 : Math.min(Math.max(settings.temperature ?? 1, 0), 1);
+    const stopSequences = (settings.stopSequences ?? []).filter(s => s.length > 0);
+    // Haiku doesn't support thinking. Others support it only at temperature === 1.
+    const useThinking = !isHaiku && temperature === 1;
 
     const stream = client.messages.stream({
-      model: 'claude-opus-4-8',
-      max_tokens: 16000,
-      thinking: { type: 'adaptive' },
+      model,
+      max_tokens: maxTokens,
+      ...(useThinking && { thinking: { type: 'adaptive' } }),
+      ...(!isOpus && temperature !== 1 && { temperature }),
+      ...(stopSequences.length > 0 && { stop_sequences: stopSequences }),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     });
 
     let thinking = false;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     for await (const event of stream) {
       if (aborted) break;
+
+      if (event.type === 'message_start') {
+        inputTokens = event.message.usage.input_tokens;
+      }
+
+      if (event.type === 'message_delta') {
+        outputTokens = event.usage.output_tokens;
+      }
 
       if (event.type === 'content_block_start' && event.content_block.type === 'thinking') {
         thinking = true;
@@ -69,6 +105,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     if (!aborted) {
+      res.write(`data: ${JSON.stringify({ usage: { input: inputTokens, output: outputTokens } })}\n\n`);
       res.write('data: [DONE]\n\n');
     }
     console.log('[chat] stream complete');
@@ -85,7 +122,7 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+  res.sendFile(path.join(process.cwd(), 'dist/public/index.html'));
 });
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
