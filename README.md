@@ -21,7 +21,7 @@ Most of these are driven by slash [commands](#commands).
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 24 LTS (see `.nvmrc` — run `nvm use`)
 - pnpm 11+
 - An [Anthropic API key](https://console.anthropic.com/)
 
