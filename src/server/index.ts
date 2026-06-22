@@ -332,7 +332,14 @@ app.post('/api/chat', async (req, res) => {
   res.flushHeaders();
 
   let aborted = false;
-  res.on('close', () => { aborted = true; });
+  let stream: ReturnType<typeof client.messages.stream> | undefined;
+  // When the client interrupts, it closes the fetch connection. Abort the
+  // upstream Anthropic stream too so we stop generating (and billing) tokens
+  // immediately instead of waiting for the next event to break the loop.
+  res.on('close', () => {
+    aborted = true;
+    if (stream && typeof stream.abort === 'function') stream.abort();
+  });
 
   // Keep the SSE connection alive while the model is thinking
   const heartbeat = setInterval(() => {
@@ -353,7 +360,7 @@ app.post('/api/chat', async (req, res) => {
     // Haiku doesn't support thinking. Others support it only at temperature === 1.
     const useThinking = !isHaiku && temperature === 1;
 
-    const stream = client.messages.stream({
+    stream = client.messages.stream({
       model,
       max_tokens: maxTokens,
       ...(system && { system }),
@@ -402,9 +409,12 @@ app.post('/api/chat', async (req, res) => {
     }
     console.log('[chat] stream complete');
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[chat] error:', message);
-    if (!aborted) {
+    if (aborted) {
+      // Expected: the user interrupted, so the upstream stream was aborted.
+      console.log('[chat] stream aborted by client');
+    } else {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[chat] error:', message);
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
     }
   } finally {

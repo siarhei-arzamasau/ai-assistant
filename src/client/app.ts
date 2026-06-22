@@ -108,6 +108,7 @@ class Chat {
   private history: Message[] = [];        // current session — displayed and saved
   private sessionId: string | null = null;
   private streaming = false;
+  private streamController: AbortController | null = null; // aborts the in-flight response when the user stops it
 
   private strategy = 'default';
   private slidingWindowSize = 10;
@@ -201,13 +202,16 @@ class Chat {
   private compareOverlayEl = document.getElementById('compareOverlay') as HTMLElement;
 
   constructor() {
-    this.sendBtn.addEventListener('click', () => this.send());
+    this.sendBtn.addEventListener('click', () => {
+      if (this.streaming) this.stopStreaming();
+      else this.send();
+    });
     this.clearBtn.addEventListener('click', () => this.newChat());
 
     this.inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (!this.sendBtn.disabled) this.send();
+        if (!this.streaming && !this.sendBtn.disabled) this.send();
       }
     });
 
@@ -349,13 +353,22 @@ class Chat {
   }
 
   private syncSendBtn() {
-    this.sendBtn.disabled = this.streaming || !this.inputEl.value.trim();
+    // While streaming the button stays enabled — it acts as a Stop button.
+    this.sendBtn.disabled = this.streaming ? false : !this.inputEl.value.trim();
   }
 
   private setStreaming(on: boolean) {
     this.streaming = on;
     this.inputEl.disabled = on;
+    this.sendBtn.classList.toggle('streaming', on);
+    this.sendBtn.setAttribute('aria-label', on ? 'Stop' : 'Send');
     this.syncSendBtn();
+  }
+
+  private stopStreaming() {
+    // Aborts the fetch; the streaming loop's reader.read() rejects with an
+    // AbortError, handled in sendMessage's catch (partial output is kept).
+    this.streamController?.abort();
   }
 
   private async newChat() {
@@ -1206,7 +1219,11 @@ class Chat {
 
     let accumulated = '';
     let usage: { input: number; output: number } | null = null;
+    let interrupted = false;
     const startTime = Date.now();
+
+    const controller = new AbortController();
+    this.streamController = controller;
 
     try {
       const baseSystem = this.buildSystemPrompt();
@@ -1220,6 +1237,7 @@ class Chat {
           settings: this.getSettings(),
           ...(system && { system }),
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -1270,18 +1288,7 @@ class Chat {
         }
       }
 
-      this.history.push({ role: 'assistant', content: accumulated });
-      if (this.strategy === 'branching' && this.activeBranchId) {
-        this.branches = this.branches.map(b =>
-          b.id === this.activeBranchId ? { ...b, messages: [...this.history] } : b
-        );
-      }
-      if (this.strategy === 'sliding-window') {
-        const maxMsgs = Math.max(1, this.slidingWindowSize) * 2;
-        if (this.history.length > maxMsgs) {
-          this.history = this.history.slice(-maxMsgs);
-        }
-      }
+      this.commitAssistantMessage(accumulated);
       assistantBubble.innerHTML = renderMarkdown(accumulated);
       await this.saveSession();
 
@@ -1297,11 +1304,29 @@ class Chat {
           .catch(() => {});
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unexpected error';
-      assistantBubble.textContent = msg;
-      assistantBubble.classList.add('error');
-      this.history.pop(); // remove user message that failed
-      accumulated = '';
+      const isAbort = controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError');
+      if (isAbort) {
+        interrupted = true;
+        if (accumulated) {
+          // Keep what was generated so the conversation stays coherent and the
+          // user can correct or continue from the partial response.
+          this.commitAssistantMessage(accumulated);
+          assistantBubble.innerHTML = renderMarkdown(accumulated);
+          await this.saveSession();
+        } else {
+          // Stopped before any text — drop the dangling user turn so history
+          // remains a valid alternating sequence for the next request.
+          this.history.pop();
+          assistantBubble.textContent = '';
+        }
+        assistantBubble.classList.add('interrupted');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Unexpected error';
+        assistantBubble.textContent = msg;
+        assistantBubble.classList.add('error');
+        this.history.pop(); // remove user message that failed
+        accumulated = '';
+      }
     } finally {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
       const timeEl = document.createElement('div');
@@ -1318,12 +1343,35 @@ class Chat {
       }
       assistantBubble.appendChild(timeEl);
 
+      if (interrupted) {
+        const tag = document.createElement('div');
+        tag.className = 'bubble-interrupted-tag';
+        tag.textContent = accumulated ? 'Stopped' : 'Stopped before any response';
+        assistantBubble.appendChild(tag);
+      }
+
       assistantBubble.classList.remove('streaming');
+      this.streamController = null;
       this.setStreaming(false);
       this.inputEl.focus();
     }
 
     return accumulated;
+  }
+
+  private commitAssistantMessage(content: string) {
+    this.history.push({ role: 'assistant', content });
+    if (this.strategy === 'branching' && this.activeBranchId) {
+      this.branches = this.branches.map(b =>
+        b.id === this.activeBranchId ? { ...b, messages: [...this.history] } : b
+      );
+    }
+    if (this.strategy === 'sliding-window') {
+      const maxMsgs = Math.max(1, this.slidingWindowSize) * 2;
+      if (this.history.length > maxMsgs) {
+        this.history = this.history.slice(-maxMsgs);
+      }
+    }
   }
 }
 
