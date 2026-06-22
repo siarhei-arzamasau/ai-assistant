@@ -20,6 +20,13 @@ interface BranchData {
   messages: Message[];
 }
 
+interface Profile {
+  id: string;
+  name: string;
+  definition: string;
+  createdAt: string;
+}
+
 interface Settings {
   model: string;
   maxTokens: number;
@@ -99,6 +106,10 @@ class Chat {
   private workingMemory: string[] = [];
   private longTermMemory: string[] = [];
 
+  // Profiles: global, applied to every dialog via the system prompt.
+  private profiles: Profile[] = [];
+  private activeProfileId: string | null = null;
+
   private lastInputTokens = 0;   // input tokens from the previous request in this session
   private sessionOutputTokens = 0; // accumulated output tokens for this session
 
@@ -141,6 +152,8 @@ class Chat {
   private shortMemoryListEl = document.getElementById('shortMemoryList') as HTMLElement;
   private workingMemoryListEl = document.getElementById('workingMemoryList') as HTMLElement;
   private longMemoryListEl = document.getElementById('longMemoryList') as HTMLElement;
+
+  private profilesListEl = document.getElementById('profilesList') as HTMLElement;
 
   private branchBarEl = document.getElementById('branchBar') as HTMLElement;
   private branchTabsEl = document.getElementById('branchTabs') as HTMLElement;
@@ -206,6 +219,7 @@ class Chat {
   private async initContext() {
     await this.loadSessions();
     await this.loadLongTermMemory();
+    await this.loadProfiles();
   }
 
   private async loadLongTermMemory() {
@@ -216,6 +230,18 @@ class Chat {
       this.renderMemoryPanel();
     } catch {
       // silently ignore — long-term memory unavailable
+    }
+  }
+
+  private async loadProfiles() {
+    try {
+      const res = await fetch('/api/profiles');
+      const data = await res.json();
+      this.profiles = data.profiles ?? [];
+      this.activeProfileId = data.activeProfileId ?? null;
+      this.renderProfilesPanel();
+    } catch {
+      // silently ignore — profiles unavailable
     }
   }
 
@@ -376,6 +402,117 @@ class Chat {
     }
   }
 
+  private renderProfilesPanel() {
+    this.profilesListEl.innerHTML = '';
+    if (this.profiles.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'profiles-empty';
+      empty.textContent = 'No profiles yet — try /create-profile <name> <definition>';
+      this.profilesListEl.appendChild(empty);
+      return;
+    }
+    for (const profile of this.profiles) {
+      const item = document.createElement('div');
+      item.className = 'profile-item' + (profile.id === this.activeProfileId ? ' active' : '');
+
+      const info = document.createElement('div');
+      info.className = 'profile-item-info';
+      info.innerHTML = `
+        <div class="profile-item-name">${escapeHtml(profile.name)}</div>
+        <div class="profile-item-def">${escapeHtml(profile.definition)}</div>
+      `;
+      info.addEventListener('click', () => this.switchProfile(profile.id));
+
+      const del = document.createElement('button');
+      del.className = 'profile-item-delete';
+      del.setAttribute('aria-label', 'Delete profile');
+      del.textContent = '×';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteProfile(profile.id);
+      });
+
+      item.appendChild(info);
+      item.appendChild(del);
+      this.profilesListEl.appendChild(item);
+    }
+  }
+
+  private async switchProfile(id: string) {
+    if (id === this.activeProfileId) return;
+    try {
+      const res = await fetch('/api/profiles/active', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      this.profiles = data.profiles ?? this.profiles;
+      this.activeProfileId = data.activeProfileId ?? null;
+      this.renderProfilesPanel();
+    } catch {
+      // ignore
+    }
+  }
+
+  private async deleteProfile(id: string) {
+    try {
+      const res = await fetch(`/api/profiles/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      this.profiles = data.profiles ?? this.profiles;
+      this.activeProfileId = data.activeProfileId ?? null;
+      this.renderProfilesPanel();
+    } catch {
+      // ignore
+    }
+  }
+
+  private async handleProfileCommand(command: string, content: string): Promise<void> {
+    if (command === 'create-profile') {
+      const spaceIdx = content.indexOf(' ');
+      const name = spaceIdx === -1 ? '' : content.slice(0, spaceIdx).trim();
+      const definition = spaceIdx === -1 ? '' : content.slice(spaceIdx + 1).trim();
+      if (!name || !definition) {
+        this.addSystemNote('Usage: /create-profile <name> <definition>');
+        return;
+      }
+      try {
+        const res = await fetch('/api/profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, definition }),
+        });
+        const data = await res.json();
+        this.profiles = data.profiles ?? this.profiles;
+        this.activeProfileId = data.activeProfileId ?? null;
+        this.addSystemNote(`Created and activated profile "${name}": ${definition}`);
+        this.renderProfilesPanel();
+      } catch {
+        this.addSystemNote('Failed to create profile');
+      }
+    } else if (command === 'profile') {
+      const active = this.profiles.find(p => p.id === this.activeProfileId);
+      if (!active) {
+        this.addSystemNote('No active profile. Use /create-profile <name> <definition>.');
+      } else {
+        this.addSystemNote(`Active profile "${active.name}": ${active.definition}`);
+      }
+    } else if (command === 'switch-profile') {
+      const names = this.profiles.map(p => p.name).join(', ') || 'none';
+      if (!content) {
+        this.addSystemNote(`Usage: /switch-profile <name>. Available: ${names}`);
+        return;
+      }
+      const target = this.profiles.find(p => p.name.toLowerCase() === content.toLowerCase());
+      if (!target) {
+        this.addSystemNote(`Profile "${content}" not found. Available: ${names}`);
+        return;
+      }
+      await this.switchProfile(target.id);
+      this.addSystemNote(`Switched to profile "${target.name}"`);
+    }
+  }
+
   private addSystemNote(text: string) {
     this.hideWelcome();
     const row = document.createElement('div');
@@ -417,6 +554,11 @@ class Chat {
 
   private buildSystemPrompt(): string {
     const parts: string[] = [];
+
+    const activeProfile = this.profiles.find(p => p.id === this.activeProfileId);
+    if (activeProfile) {
+      parts.push(`User profile "${activeProfile.name}" — follow this style, format and constraints for all responses:\n${activeProfile.definition}`);
+    }
 
     const factsEntries = Object.entries(this.facts);
     if (this.strategy === 'sticky-facts' && factsEntries.length > 0) {
@@ -782,12 +924,18 @@ class Chat {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
 
-    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory)(?:\s+([\s\S]+))?$/);
+    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory|create-profile|profile|switch-profile)(?:\s+([\s\S]+))?$/);
     if (cmdMatch) {
       this.inputEl.value = '';
       this.inputEl.style.height = 'auto';
       this.syncSendBtn();
-      await this.handleMemoryCommand(cmdMatch[1], (cmdMatch[2] ?? '').trim());
+      const command = cmdMatch[1];
+      const content = (cmdMatch[2] ?? '').trim();
+      if (command === 'create-profile' || command === 'profile' || command === 'switch-profile') {
+        await this.handleProfileCommand(command, content);
+      } else {
+        await this.handleMemoryCommand(command, content);
+      }
       return;
     }
 

@@ -23,6 +23,18 @@ interface BranchData {
   messages: ChatMessage[];
 }
 
+interface Profile {
+  id: string;
+  name: string;
+  definition: string;
+  createdAt: string;
+}
+
+interface ProfilesData {
+  profiles: Profile[];
+  activeProfileId: string | null;
+}
+
 interface Session {
   id: string;
   title: string;
@@ -53,6 +65,7 @@ interface ChatSettings {
 const DATA_DIR = path.join(process.cwd(), 'data');
 const HISTORY_FILE = path.join(DATA_DIR, 'chat-history.json');
 const LONG_TERM_MEMORY_FILE = path.join(DATA_DIR, 'long-term-memory.json');
+const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
 
 function loadSessions(): Session[] {
   try {
@@ -80,6 +93,20 @@ function loadLongTermMemory(): string[] {
 function saveLongTermMemory(entries: string[]): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(LONG_TERM_MEMORY_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+}
+
+function loadProfiles(): ProfilesData {
+  try {
+    if (!fs.existsSync(PROFILES_FILE)) return { profiles: [], activeProfileId: null };
+    return JSON.parse(fs.readFileSync(PROFILES_FILE, 'utf-8'));
+  } catch {
+    return { profiles: [], activeProfileId: null };
+  }
+}
+
+function saveProfiles(data: ProfilesData): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(PROFILES_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 app.get('/api/history', (req, res) => {
@@ -166,6 +193,46 @@ app.delete('/api/long-term-memory/:index', (req, res) => {
   entries.splice(index, 1);
   saveLongTermMemory(entries);
   res.json({ entries });
+});
+
+app.get('/api/profiles', (_req, res) => {
+  res.json(loadProfiles());
+});
+
+app.post('/api/profiles', (req, res) => {
+  const { name, definition } = req.body as { name: string; definition: string };
+  if (!name || !name.trim() || !definition || !definition.trim()) {
+    res.status(400).json({ error: 'name and definition are required' });
+    return;
+  }
+  const data = loadProfiles();
+  const profile: Profile = { id: randomUUID(), name: name.trim(), definition: definition.trim(), createdAt: new Date().toISOString() };
+  data.profiles.push(profile);
+  data.activeProfileId = profile.id;
+  saveProfiles(data);
+  res.json(data);
+});
+
+app.patch('/api/profiles/active', (req, res) => {
+  const { id } = req.body as { id: string | null };
+  const data = loadProfiles();
+  if (id !== null && !data.profiles.some(p => p.id === id)) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  data.activeProfileId = id;
+  saveProfiles(data);
+  res.json(data);
+});
+
+app.delete('/api/profiles/:id', (req, res) => {
+  const data = loadProfiles();
+  const idx = data.profiles.findIndex(p => p.id === req.params.id);
+  if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
+  data.profiles.splice(idx, 1);
+  if (data.activeProfileId === req.params.id) data.activeProfileId = null;
+  saveProfiles(data);
+  res.json(data);
 });
 
 app.post('/api/sessions/:id/extract-facts', async (req, res) => {
