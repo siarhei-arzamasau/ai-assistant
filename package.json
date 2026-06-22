@@ -2,27 +2,45 @@
   "name": "claude-chat",
   "version": "1.0.0",
   "description": "Chat application powered by Claude via the Anthropic API",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "esbuild src/client/app.ts --bundle --outfile=dist/public/app.js --platform=browser",
+    "build:client": "esbuild src/client/index.tsx --bundle --outfile=dist/public/app.js --platform=browser --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\"",
+    "typecheck:client": "tsc -p tsconfig.client.json",
     "copy:assets": "cp src/client/index.html dist/public/ && cp src/client/style.css dist/public/",
     "build": "mkdir -p dist/public && pnpm run build:server && pnpm run build:client && pnpm run copy:assets",
     "start": "node dist/server/index.js",
     "dev:server": "tsx watch src/server/index.ts",
-    "dev:client": "esbuild src/client/app.ts --bundle --outfile=dist/public/app.js --platform=browser --watch",
+    "dev:client": "esbuild src/client/index.tsx --bundle --outfile=dist/public/app.js --platform=browser --jsx=automatic --define:process.env.NODE_ENV=\\\"development\\\" --watch",
     "dev": "mkdir -p dist/public && pnpm run copy:assets && concurrently \"pnpm run dev:server\" \"pnpm run dev:client\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "dotenv": "^16.0.0",
-    "express": "^4.18.0"
+    "express": "^4.18.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.0.0",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.0",
     "concurrently": "^8.0.0",
     "esbuild": "^0.25.0",
+    "jsdom": "^29.1.1",
+    "supertest": "^7.2.2",
     "tsx": "^4.7.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.9"
   }
 }

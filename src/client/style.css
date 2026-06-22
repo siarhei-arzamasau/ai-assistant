@@ -565,17 +565,62 @@ body {
   word-break: break-word;
 }
 
+/* ── Collapsible side panel wrapper ── */
+/* The collapse tab lives outside the collapsing panel (as the sidebar's
+   toggle lives in the page header) so it stays clickable after the panel
+   collapses to width: 0 — a button inside the collapsing element would
+   collapse away with it and become unreachable. */
+
+.panel-wrap {
+  display: flex;
+  flex-shrink: 0;
+  order: -1;
+}
+
+/* A normal flex sibling (not absolutely positioned) so it always keeps its
+   own slot in the layout and never overlaps a neighboring panel's tab when
+   several panels collapse to width: 0 side by side. */
+.panel-collapse-tab {
+  width: 14px;
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  transition: background 0.12s, color 0.12s;
+}
+
+.panel-collapse-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.panel-collapse-tab.collapsed {
+  transform: scaleX(-1);
+}
+
 /* ── Memory panel ── */
 
 .memory-panel {
   width: 230px;
   flex-shrink: 0;
-  order: -1;
-  border-right: 1px solid var(--border);
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  transition: width 0.22s ease;
+}
+
+.memory-panel.collapsed {
+  width: 0;
+  overflow: hidden;
 }
 
 .memory-header {
@@ -587,6 +632,7 @@ body {
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .memory-section {
@@ -668,12 +714,16 @@ body {
 .invariants-panel {
   width: 220px;
   flex-shrink: 0;
-  order: -1;
-  border-right: 1px solid var(--border);
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  transition: width 0.22s ease;
+}
+
+.invariants-panel.collapsed {
+  width: 0;
+  overflow: hidden;
 }
 
 .invariants-header {
@@ -685,6 +735,7 @@ body {
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .invariants-panel .memory-list {
@@ -696,12 +747,16 @@ body {
 .profiles-panel {
   width: 200px;
   flex-shrink: 0;
-  order: -1;
-  border-right: 1px solid var(--border);
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  transition: width 0.22s ease;
+}
+
+.profiles-panel.collapsed {
+  width: 0;
+  overflow: hidden;
 }
 
 .profiles-header {
@@ -713,6 +768,7 @@ body {
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .profiles-list {
@@ -813,6 +869,19 @@ body {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   text-align: center;
+  white-space: pre-wrap;
+}
+
+.bubble-system.align-left {
+  text-align: left;
+}
+
+.bubble-system.mono {
+  max-width: min(720px, 95%);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  overflow-x: auto;
 }
 
 /* ── Chat area ── */
@@ -1255,6 +1324,23 @@ body {
   .bubble-time { border-top-color: rgba(255, 255, 255, 0.08); }
 }
 
+/* Interrupted (user-stopped) response marker */
+.bubble-assistant.interrupted {
+  border-left: 2px solid var(--text-placeholder);
+}
+
+.bubble-interrupted-tag {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.bubble-interrupted-tag::before {
+  content: '■ ';
+}
+
 /* Thinking indicator */
 .bubble-assistant[data-thinking]::before {
   content: 'Thinking…';
@@ -1383,8 +1469,21 @@ body {
   height: 16px;
 }
 
+/* Send vs. stop icon swap — driven by the .streaming class on the button */
+.btn-send .icon-stop { display: none; }
+.btn-send.streaming .icon-send { display: none; }
+.btn-send.streaming .icon-stop { display: block; }
+
 .btn-send:hover:not(:disabled) {
   background: #b45309;
+}
+
+.btn-send.streaming {
+  background: var(--error, #dc2626);
+}
+
+.btn-send.streaming:hover:not(:disabled) {
+  background: #b91c1c;
 }
 
 .btn-send:active:not(:disabled) {
