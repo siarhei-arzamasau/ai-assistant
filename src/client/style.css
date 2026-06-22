@@ -513,6 +513,121 @@ body {
   word-break: break-word;
 }
 
+/* ── Memory panel ── */
+
+.memory-panel {
+  width: 230px;
+  flex-shrink: 0;
+  order: -1;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.memory-header {
+  padding: 12px 14px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.memory-section {
+  padding: 10px 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.memory-section:last-child {
+  border-bottom: none;
+}
+
+.memory-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.memory-hint {
+  font-weight: 400;
+  color: var(--text-placeholder);
+  font-size: 10.5px;
+  margin-left: 4px;
+}
+
+.memory-list {
+  padding-bottom: 6px;
+}
+
+.memory-empty {
+  font-size: 11px;
+  color: var(--text-placeholder);
+  padding: 2px 0 6px;
+}
+
+.memory-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  margin-bottom: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.memory-item-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.memory-item-delete {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.12s, color 0.12s;
+}
+
+.memory-item-delete:hover {
+  background: var(--bg-hover);
+  color: var(--error);
+}
+
+/* ── System note bubble (memory command confirmations) ── */
+
+.message-system {
+  justify-content: center;
+}
+
+.bubble-system {
+  max-width: min(560px, 90%);
+  padding: 6px 12px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
 /* ── Chat area ── */
 
 .chat-area {
