@@ -92,6 +92,13 @@ class Chat {
   private branches: BranchData[] = [];
   private activeBranchId: string | null = null;
 
+  // Memory layers: short-term (this dialog only, never persisted), working
+  // (this task/session, persisted with the session) and long-term (global,
+  // persisted across all sessions).
+  private shortMemory: string[] = [];
+  private workingMemory: string[] = [];
+  private longTermMemory: string[] = [];
+
   private lastInputTokens = 0;   // input tokens from the previous request in this session
   private sessionOutputTokens = 0; // accumulated output tokens for this session
 
@@ -130,6 +137,10 @@ class Chat {
   private slidingWindowSizeEl = document.getElementById('slidingWindowSize') as HTMLInputElement;
   private factsPanelEl = document.getElementById('factsPanel') as HTMLElement;
   private factsListEl = document.getElementById('factsList') as HTMLElement;
+
+  private shortMemoryListEl = document.getElementById('shortMemoryList') as HTMLElement;
+  private workingMemoryListEl = document.getElementById('workingMemoryList') as HTMLElement;
+  private longMemoryListEl = document.getElementById('longMemoryList') as HTMLElement;
 
   private branchBarEl = document.getElementById('branchBar') as HTMLElement;
   private branchTabsEl = document.getElementById('branchTabs') as HTMLElement;
@@ -194,6 +205,18 @@ class Chat {
 
   private async initContext() {
     await this.loadSessions();
+    await this.loadLongTermMemory();
+  }
+
+  private async loadLongTermMemory() {
+    try {
+      const res = await fetch('/api/long-term-memory');
+      const data = await res.json();
+      this.longTermMemory = data.entries ?? [];
+      this.renderMemoryPanel();
+    } catch {
+      // silently ignore — long-term memory unavailable
+    }
   }
 
   private toggleSidebar() {
@@ -257,7 +280,10 @@ class Chat {
     this.facts = {};
     this.branches = [];
     this.activeBranchId = null;
+    this.shortMemory = [];
+    this.workingMemory = [];
     this.renderFacts();
+    this.renderMemoryPanel();
     this.renderBranchTabs();
     this.lastInputTokens = 0;
     this.sessionOutputTokens = 0;
@@ -294,6 +320,119 @@ class Chat {
       item.innerHTML = `<span class="facts-key">${escapeHtml(key)}</span><span class="facts-value">${escapeHtml(value)}</span>`;
       this.factsListEl.appendChild(item);
     }
+  }
+
+  private renderMemoryPanel() {
+    this.renderMemoryList(this.shortMemoryListEl, this.shortMemory, '/short-memory', (i) => this.deleteShortMemory(i));
+    this.renderMemoryList(this.workingMemoryListEl, this.workingMemory, '/work-memory', (i) => this.deleteWorkingMemory(i));
+    this.renderMemoryList(this.longMemoryListEl, this.longTermMemory, '/long-memory', (i) => this.deleteLongTermMemory(i));
+  }
+
+  private renderMemoryList(listEl: HTMLElement, entries: string[], command: string, onDelete: (index: number) => void) {
+    listEl.innerHTML = '';
+    if (entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'memory-empty';
+      empty.textContent = `Empty — try ${command} <text>`;
+      listEl.appendChild(empty);
+      return;
+    }
+    entries.forEach((entry, i) => {
+      const item = document.createElement('div');
+      item.className = 'memory-item';
+      const text = document.createElement('span');
+      text.className = 'memory-item-text';
+      text.textContent = entry;
+      const del = document.createElement('button');
+      del.className = 'memory-item-delete';
+      del.setAttribute('aria-label', 'Remove entry');
+      del.textContent = '×';
+      del.addEventListener('click', () => onDelete(i));
+      item.appendChild(text);
+      item.appendChild(del);
+      listEl.appendChild(item);
+    });
+  }
+
+  private deleteShortMemory(index: number) {
+    this.shortMemory.splice(index, 1);
+    this.renderMemoryPanel();
+  }
+
+  private deleteWorkingMemory(index: number) {
+    this.workingMemory.splice(index, 1);
+    this.renderMemoryPanel();
+    this.saveSession();
+  }
+
+  private async deleteLongTermMemory(index: number) {
+    try {
+      const res = await fetch(`/api/long-term-memory/${index}`, { method: 'DELETE' });
+      const data = await res.json();
+      this.longTermMemory = data.entries ?? this.longTermMemory;
+      this.renderMemoryPanel();
+    } catch {
+      // ignore
+    }
+  }
+
+  private addSystemNote(text: string) {
+    this.hideWelcome();
+    const row = document.createElement('div');
+    row.className = 'message message-system';
+    row.innerHTML = `<div class="bubble bubble-system"></div>`;
+    row.querySelector('.bubble')!.textContent = text;
+    this.messagesEl.appendChild(row);
+    this.scrollBottom();
+  }
+
+  private async handleMemoryCommand(command: string, content: string): Promise<void> {
+    if (!content) {
+      this.addSystemNote(`Usage: /${command} <text>`);
+      return;
+    }
+    if (command === 'short-memory') {
+      this.shortMemory.push(content);
+      this.addSystemNote(`Added to short-term memory: "${content}"`);
+    } else if (command === 'work-memory') {
+      this.workingMemory.push(content);
+      this.addSystemNote(`Added to working memory: "${content}"`);
+      await this.saveSession();
+    } else if (command === 'long-memory') {
+      try {
+        const res = await fetch('/api/long-term-memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry: content }),
+        });
+        const data = await res.json();
+        this.longTermMemory = data.entries ?? this.longTermMemory;
+        this.addSystemNote(`Added to long-term memory: "${content}"`);
+      } catch {
+        this.addSystemNote('Failed to save to long-term memory');
+      }
+    }
+    this.renderMemoryPanel();
+  }
+
+  private buildSystemPrompt(): string {
+    const parts: string[] = [];
+
+    const factsEntries = Object.entries(this.facts);
+    if (this.strategy === 'sticky-facts' && factsEntries.length > 0) {
+      parts.push('Key facts from this conversation:\n' + factsEntries.map(([k, v]) => `- ${k}: ${v}`).join('\n'));
+    }
+    if (this.shortMemory.length > 0) {
+      parts.push('Short-term memory (this conversation only):\n' + this.shortMemory.map(e => `- ${e}`).join('\n'));
+    }
+    if (this.workingMemory.length > 0) {
+      parts.push('Working memory (persists across this task):\n' + this.workingMemory.map(e => `- ${e}`).join('\n'));
+    }
+    if (this.longTermMemory.length > 0) {
+      parts.push('Long-term memory (always remembered, across all conversations):\n' + this.longTermMemory.map(e => `- ${e}`).join('\n'));
+    }
+
+    return parts.join('\n\n');
   }
 
   private updateSessionStats() {
@@ -427,6 +566,8 @@ class Chat {
       this.facts = session.facts ?? {};
       this.branches = session.branches ?? [];
       this.activeBranchId = session.activeBranchId ?? null;
+      this.workingMemory = session.workingMemory ?? [];
+      this.shortMemory = []; // short-term memory never persists across dialogs
       if (this.activeBranchId) {
         const active = this.branches.find(b => b.id === this.activeBranchId);
         this.history = active ? [...active.messages] : [...session.messages];
@@ -434,6 +575,7 @@ class Chat {
         this.history = [...session.messages];
       }
       this.renderFacts();
+      this.renderMemoryPanel();
       this.renderBranchTabs();
       this.updateStrategyUI();
       this.renderHistory();
@@ -444,11 +586,12 @@ class Chat {
   }
 
   private async saveSession() {
-    if (this.history.length === 0 && this.branches.length === 0) return;
+    if (this.history.length === 0 && this.branches.length === 0 && this.workingMemory.length === 0) return;
     try {
       const strategy = (this.strategy === 'none' || this.strategy === 'default') ? undefined : this.strategy;
       const slidingWindowSize = strategy === 'sliding-window' ? this.slidingWindowSize : undefined;
       const facts = strategy === 'sticky-facts' ? this.facts : undefined;
+      const workingMemory = this.workingMemory.length > 0 ? this.workingMemory : undefined;
 
       // Keep active branch in sync before saving
       let branches: BranchData[] | undefined;
@@ -465,6 +608,7 @@ class Chat {
         strategy,
         slidingWindowSize,
         facts,
+        workingMemory,
         ...(branches && { branches, activeBranchId }),
       };
 
@@ -638,6 +782,15 @@ class Chat {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
 
+    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory)(?:\s+([\s\S]+))?$/);
+    if (cmdMatch) {
+      this.inputEl.value = '';
+      this.inputEl.style.height = 'auto';
+      this.syncSendBtn();
+      await this.handleMemoryCommand(cmdMatch[1], (cmdMatch[2] ?? '').trim());
+      return;
+    }
+
     this.history.push({ role: 'user', content: text });
     const userBubble = this.addBubble('user');
     userBubble.textContent = text;
@@ -654,10 +807,7 @@ class Chat {
     const startTime = Date.now();
 
     try {
-      const factsEntries = Object.entries(this.facts);
-      const system = this.strategy === 'sticky-facts' && factsEntries.length > 0
-        ? 'Key facts from this conversation:\n' + factsEntries.map(([k, v]) => `- ${k}: ${v}`).join('\n')
-        : '';
+      const system = this.buildSystemPrompt();
 
       const res = await fetch('/api/chat', {
         method: 'POST',

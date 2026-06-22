@@ -99,6 +99,22 @@
         </div>
       </aside>
 
+      <aside class="memory-panel" id="memoryPanel">
+        <div class="memory-header">Memory Layers</div>
+        <div class="memory-section">
+          <div class="memory-section-title">Short-term <span class="memory-hint">this dialog</span></div>
+          <div class="memory-list" id="shortMemoryList"></div>
+        </div>
+        <div class="memory-section">
+          <div class="memory-section-title">Working <span class="memory-hint">this task</span></div>
+          <div class="memory-list" id="workingMemoryList"></div>
+        </div>
+        <div class="memory-section">
+          <div class="memory-section-title">Long-term <span class="memory-hint">always</span></div>
+          <div class="memory-list" id="longMemoryList"></div>
+        </div>
+      </aside>
+
       <div class="chat-area">
         <div class="branch-bar" id="branchBar">
           <div class="branch-tabs" id="branchTabs"></div>
@@ -133,7 +149,7 @@
             </button>
           </div>
           <div id="sessionStats" class="session-stats" hidden></div>
-          <p class="footer-note">Claude can make mistakes. Verify important information.</p>
+          <p class="footer-note">Claude can make mistakes. Verify important information. · /short-memory, /work-memory, /long-memory &lt;text&gt;</p>
         </footer>
       </div>
     </div>

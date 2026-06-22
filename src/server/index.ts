@@ -34,6 +34,7 @@ interface Session {
   facts?: Record<string, string>;
   branches?: BranchData[];
   activeBranchId?: string;
+  workingMemory?: string[];
 }
 
 const ALLOWED_MODELS = new Set([
@@ -51,6 +52,7 @@ interface ChatSettings {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const HISTORY_FILE = path.join(DATA_DIR, 'chat-history.json');
+const LONG_TERM_MEMORY_FILE = path.join(DATA_DIR, 'long-term-memory.json');
 
 function loadSessions(): Session[] {
   try {
@@ -64,6 +66,20 @@ function loadSessions(): Session[] {
 function saveSessions(sessions: Session[]): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+}
+
+function loadLongTermMemory(): string[] {
+  try {
+    if (!fs.existsSync(LONG_TERM_MEMORY_FILE)) return [];
+    return JSON.parse(fs.readFileSync(LONG_TERM_MEMORY_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveLongTermMemory(entries: string[]): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(LONG_TERM_MEMORY_FILE, JSON.stringify(entries, null, 2), 'utf-8');
 }
 
 app.get('/api/history', (req, res) => {
@@ -93,19 +109,19 @@ app.get('/api/sessions/:id', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { messages, strategy, slidingWindowSize, facts, branches, activeBranchId } = req.body as { messages: ChatMessage[]; strategy?: string; slidingWindowSize?: number; facts?: Record<string, string>; branches?: BranchData[]; activeBranchId?: string };
+  const { messages, strategy, slidingWindowSize, facts, branches, activeBranchId, workingMemory } = req.body as { messages: ChatMessage[]; strategy?: string; slidingWindowSize?: number; facts?: Record<string, string>; branches?: BranchData[]; activeBranchId?: string; workingMemory?: string[] };
   const sessions = loadSessions();
   const now = new Date().toISOString();
   const firstUser = messages.find(m => m.role === 'user');
   const title = firstUser ? firstUser.content.slice(0, 60) : 'New chat';
-  const session: Session = { id: randomUUID(), title, createdAt: now, updatedAt: now, messages, strategy, slidingWindowSize, facts, branches, activeBranchId };
+  const session: Session = { id: randomUUID(), title, createdAt: now, updatedAt: now, messages, strategy, slidingWindowSize, facts, branches, activeBranchId, workingMemory };
   sessions.push(session);
   saveSessions(sessions);
   res.json({ id: session.id });
 });
 
 app.patch('/api/sessions/:id', (req, res) => {
-  const { messages, strategy, slidingWindowSize, facts, branches, activeBranchId } = req.body as { messages: ChatMessage[]; strategy?: string; slidingWindowSize?: number; facts?: Record<string, string>; branches?: BranchData[]; activeBranchId?: string };
+  const { messages, strategy, slidingWindowSize, facts, branches, activeBranchId, workingMemory } = req.body as { messages: ChatMessage[]; strategy?: string; slidingWindowSize?: number; facts?: Record<string, string>; branches?: BranchData[]; activeBranchId?: string; workingMemory?: string[] };
   const sessions = loadSessions();
   const idx = sessions.findIndex(s => s.id === req.params.id);
   if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
@@ -115,6 +131,7 @@ app.patch('/api/sessions/:id', (req, res) => {
   sessions[idx].facts = facts;
   sessions[idx].branches = branches;
   sessions[idx].activeBranchId = activeBranchId;
+  sessions[idx].workingMemory = workingMemory;
   sessions[idx].updatedAt = new Date().toISOString();
   saveSessions(sessions);
   res.json({ ok: true });
@@ -127,6 +144,28 @@ app.delete('/api/sessions/:id', (req, res) => {
   sessions.splice(idx, 1);
   saveSessions(sessions);
   res.json({ ok: true });
+});
+
+app.get('/api/long-term-memory', (_req, res) => {
+  res.json({ entries: loadLongTermMemory() });
+});
+
+app.post('/api/long-term-memory', (req, res) => {
+  const { entry } = req.body as { entry: string };
+  if (!entry || !entry.trim()) { res.status(400).json({ error: 'entry is required' }); return; }
+  const entries = loadLongTermMemory();
+  entries.push(entry.trim());
+  saveLongTermMemory(entries);
+  res.json({ entries });
+});
+
+app.delete('/api/long-term-memory/:index', (req, res) => {
+  const index = parseInt(req.params.index, 10);
+  const entries = loadLongTermMemory();
+  if (isNaN(index) || index < 0 || index >= entries.length) { res.status(404).json({ error: 'Not found' }); return; }
+  entries.splice(index, 1);
+  saveLongTermMemory(entries);
+  res.json({ entries });
 });
 
 app.post('/api/sessions/:id/extract-facts', async (req, res) => {
