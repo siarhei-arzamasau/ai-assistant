@@ -38,6 +38,7 @@ export const MODELS: { value: string; label: string }[] = [
 export const MCP_SERVERS: { id: string; label: string }[] = [
   { id: 'omdb', label: 'OMDb' },
   { id: 'weather', label: 'Weather' },
+  { id: 'currency', label: 'Currency' },
 ];
 
 export const STRATEGIES: { value: string; label: string }[] = [

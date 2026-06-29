@@ -263,13 +263,84 @@ pnpm mcp:weather
 
 - **`Missing weatherstack API key`** — `WEATHERSTACK_API_KEY` is not set in `.env`.
 - **Empty summaries** — no observations collected yet (the first snapshot is taken when the job
-  starts; subsequent ones follow `intervalMinutes`).
+  starts; subsequent ones follow the interval).
+
+---
+
+# Currency MCP Server (scheduled)
+
+A local MCP **server** over the [currencylayer API](https://currencylayer.com/) — the same scheduler
+pattern as the Weather server, but for exchange rates: one-off lookups, periodic collection into JSON,
+deferred reminders, and an aggregated per-pair summary.
+
+```
+Browser (Settings → MCP tools → [Currency])
+  → POST /api/chat { mcpServers: ["currency"] }
+    → Express agent: Claude with tools
+        ↕ stdio (MCP), via the server registry
+      currency-server.ts (child process, lives as long as the backend)
+        ├─ scheduler (setTimeout chains) + JSON store under data/currency/
+        └─ currencylayer /live  (HTTP, free plan: source = USD)
+```
+
+## Setup
+
+1. **Get a free currencylayer API key** at [currencylayer.com](https://currencylayer.com/).
+2. **Add it to your `.env`** at the project root:
+
+   ```env
+   CURRENCY_API_KEY=your_currencylayer_api_key_here
+   ```
+
+## Using it from the chat UI
+
+1. `pnpm dev` → open <http://localhost:3000>, open **Settings**, enable **MCP tools → Currency**.
+2. Try, for example:
+   - “Collect USD→EUR and GBP rates every 30 seconds, 3 times” → starts a periodic collection job.
+   - “Give me a summary of the collected rates” → aggregated per-pair result (min/max/avg, change).
+   - “Remind me in 2 minutes to check the EUR rate” → schedules a one-off reminder.
+
+Jobs and collected rates are written to `data/currency/` (gitignored) and **survive a backend
+restart**. On the currencylayer free plan the base currency is **USD** only.
+
+## Tools
+
+| Tool                       | Arguments                                                                  | What it does                                   |
+| -------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------- |
+| `get_live_rates`           | `currencies?`, `source?`                                                   | One-off live rates (not stored).               |
+| `schedule_rate_collection` | `currencies`, `source?`, `intervalSeconds` and/or `intervalMinutes`, `maxRuns?` | Periodic snapshots into JSON; first one now. |
+| `schedule_rate_reminder`   | `message`, `delaySeconds` and/or `delayMinutes`                            | One-off deferred reminder.                     |
+| `list_rate_jobs`           | —                                                                          | All jobs with status / run count / next run.   |
+| `cancel_rate_job`          | `jobId`                                                                    | Cancel an active job.                          |
+| `get_rate_summary`         | `jobId?`, `currency?`                                                      | Aggregated per-pair result over observations.  |
+| `list_due_rate_reminders`  | —                                                                          | Reminders that have already fired.             |
+
+Tool names are distinct from the Weather server's, so both can be enabled at the same time without
+collisions.
+
+## Running the server standalone
+
+```bash
+pnpm mcp:currency
+```
+
+## Files
+
+| File                    | Purpose                                                                  |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `currency-server.ts`    | The MCP server: tools + scheduler + JSON persistence over stdio.         |
+| `currency-aggregate.ts` | Pure `aggregateRates()` used for `get_rate_summary` (unit-tested).       |
+
+## Troubleshooting
+
+- **`Missing currencylayer API key`** — `CURRENCY_API_KEY` is not set in `.env`.
+- **`You have supplied an invalid Source Currency.`** — the free plan only supports `source=USD`.
 
 ---
 
 # Connecting MCP servers to the agent
 
-Both local servers above are wired into the chat agent through a small **registry**:
+The local servers above are wired into the chat agent through a small **registry**:
 
 | File              | Purpose                                                                            |
 | ----------------- | ---------------------------------------------------------------------------------- |

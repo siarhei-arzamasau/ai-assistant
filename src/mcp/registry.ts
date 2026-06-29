@@ -9,6 +9,7 @@ import { StdioMcpClient } from './stdio-client.js';
 export const MCP_SERVERS = {
   omdb: { label: 'OMDb', entry: 'src/mcp/omdb-server.ts' },
   weather: { label: 'Weather', entry: 'src/mcp/weather-server.ts' },
+  currency: { label: 'Currency', entry: 'src/mcp/currency-server.ts' },
 } as const;
 
 export type McpServerId = keyof typeof MCP_SERVERS;
