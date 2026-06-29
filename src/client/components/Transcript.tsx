@@ -29,7 +29,37 @@ function AssistantBubble({ item }: { item: Extract<DisplayItem, { kind: 'message
   );
 }
 
+function ToolRow({ item }: { item: Extract<DisplayItem, { kind: 'tool' }> }) {
+  const icon = item.status === 'running' ? '⏳' : item.status === 'error' ? '⚠️' : '✓';
+  const args = (() => {
+    try { return JSON.stringify(item.input); } catch { return '{}'; }
+  })();
+
+  return (
+    <div className="message message-tool">
+      <div className={'tool-call tool-call--' + item.status}>
+        <div className="tool-call-head">
+          <span className="tool-call-icon">{icon}</span>
+          <span className="tool-call-badge">MCP · OMDb</span>
+          <span className="tool-call-name">{item.name}</span>
+          <code className="tool-call-args">{args}</code>
+        </div>
+        {item.result !== undefined && (
+          <details className="tool-call-result">
+            <summary>{item.status === 'error' ? 'Error' : 'Result'}</summary>
+            <pre>{item.result}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Item({ item }: { item: DisplayItem }) {
+  if (item.kind === 'tool') {
+    return <ToolRow item={item} />;
+  }
+
   if (item.kind === 'system') {
     const cls = 'bubble bubble-system' + (item.align === 'left' ? ' align-left' : '') + (item.mono ? ' mono' : '');
     return (

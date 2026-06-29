@@ -38,6 +38,7 @@ export interface Store {
   maxTokens: number;
   temperature: number;
   stopSequencesRaw: string;
+  mcpEnabled: boolean;         // expose the OMDb MCP server's tools to the agent
 
   // UI
   sidebarCollapsed: boolean;
@@ -75,6 +76,7 @@ function initialStore(): Store {
     maxTokens: 16000,
     temperature: 1,
     stopSequencesRaw: '',
+    mcpEnabled: false,
     sidebarCollapsed: false,
     settingsOpen: false,
     memoryCollapsed: false,
@@ -99,6 +101,7 @@ export interface ChatActions {
   setStopSequences(raw: string): void;
   setSlidingWindowSize(n: number): void;
   setStrategy(strategy: string): void;
+  toggleMcp(): void;
   // sessions
   newChat(): void;
   openSession(id: string): Promise<void>;
@@ -311,7 +314,7 @@ export function useChat(): { s: Store; a: ChatActions } {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: apiMessages(), settings: buildSettings(), ...(system && { system }) }),
+          body: JSON.stringify({ messages: apiMessages(), settings: buildSettings(), useTools: st.mcpEnabled, ...(system && { system }) }),
           signal: controller.signal,
         });
 
@@ -334,13 +337,38 @@ export function useChat(): { s: Store; a: ChatActions } {
             const payload = line.slice(6);
             if (payload === '[DONE]') continue;
 
-            let parsed: { text?: string; error?: string; thinking?: boolean; usage?: { input: number; output: number } };
+            let parsed: {
+              text?: string; error?: string; thinking?: boolean;
+              usage?: { input: number; output: number };
+              tool_use?: { id: string; name: string; input: unknown };
+              tool_result?: { id: string; name: string; content: string; isError: boolean };
+            };
             try { parsed = JSON.parse(payload); } catch { continue; }
 
             if (parsed.error) throw new Error(parsed.error);
             if (parsed.usage) usage = parsed.usage;
             if (parsed.thinking === true && !accumulated) { live.thinking = true; render(); }
             if (parsed.thinking === false) { live.thinking = false; render(); }
+            if (parsed.tool_use) {
+              // Show the tool call as its own row, just above the live answer bubble.
+              const tu = parsed.tool_use;
+              const liveIdx = st.transcript.indexOf(live);
+              const insertAt = liveIdx === -1 ? st.transcript.length : liveIdx;
+              st.transcript.splice(insertAt, 0, {
+                kind: 'tool', id: tu.id, name: tu.name, input: tu.input, status: 'running',
+              });
+              live.thinking = false;
+              render();
+            }
+            if (parsed.tool_result) {
+              const tr = parsed.tool_result;
+              const item = st.transcript.find(i => i.kind === 'tool' && i.id === tr.id);
+              if (item && item.kind === 'tool') {
+                item.status = tr.isError ? 'error' : 'done';
+                item.result = tr.content;
+              }
+              render();
+            }
             if (parsed.text) {
               live.thinking = false;
               accumulated += parsed.text;
@@ -741,6 +769,7 @@ export function useChat(): { s: Store; a: ChatActions } {
       setStopSequences(raw) { s().stopSequencesRaw = raw; render(); },
       setSlidingWindowSize(n) { if (!isNaN(n) && n >= 1) { s().slidingWindowSize = n; render(); } },
       setStrategy(clicked) { const st = s(); st.strategy = st.strategy === clicked ? 'default' : clicked; render(); },
+      toggleMcp() { s().mcpEnabled = !s().mcpEnabled; render(); },
       newChat,
       openSession,
       deleteSession,

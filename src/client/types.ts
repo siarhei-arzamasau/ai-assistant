@@ -66,6 +66,14 @@ export type DisplayItem =
       text: string;
       align?: 'left' | 'center';
       mono?: boolean;
+    }
+  | {
+      kind: 'tool';
+      id: string;            // matches the tool_use id streamed from the server
+      name: string;
+      input: unknown;
+      status: 'running' | 'done' | 'error';
+      result?: string;
     };
 
 export interface CompareColumn {

@@ -3,8 +3,8 @@
   "compilerOptions": {
     "module": "commonjs",
     "lib": ["ES2023"],
-    "outDir": "./dist/server",
-    "rootDir": "./src/server"
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "include": ["src/server/**/*"]
+  "include": ["src/server/**/*", "src/mcp/omdb-client.ts"]
 }

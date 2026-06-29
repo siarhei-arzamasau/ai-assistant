@@ -18,6 +18,7 @@
     "typecheck:mcp": "tsc -p tsconfig.mcp.json",
     "mcp": "tsx src/mcp/cli.ts",
     "mcp:demo": "tsx src/mcp/demo.ts",
+    "mcp:omdb": "tsx src/mcp/omdb-server.ts",
     "copy:assets": "cp src/client/index.html dist/public/ && cp src/client/style.css dist/public/",
     "build": "mkdir -p dist/public && pnpm run build:server && pnpm run build:client && pnpm run copy:assets",
     "start": "node dist/server/index.js",

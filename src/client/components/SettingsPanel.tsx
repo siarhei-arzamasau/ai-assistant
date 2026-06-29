@@ -76,6 +76,20 @@ export function SettingsPanel({ s, a }: { s: Store; a: ChatActions }) {
             </div>
           )}
         </div>
+        <div className="setting-item setting-item--mcp">
+          <div className="setting-label-inline">Tools</div>
+          <button
+            className={'mcp-toggle' + (s.mcpEnabled ? ' active' : '')}
+            aria-pressed={s.mcpEnabled}
+            onClick={a.toggleMcp}
+          >
+            <span className="mcp-toggle-dot" />
+            OMDb MCP server {s.mcpEnabled ? 'on' : 'off'}
+          </button>
+          <div className="setting-hint setting-hint--below">
+            Lets the agent search movies &amp; fetch details via the OMDb MCP server
+          </div>
+        </div>
       </div>
     </div>
   );

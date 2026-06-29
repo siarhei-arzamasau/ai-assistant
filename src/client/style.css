@@ -1121,6 +1121,142 @@ body {
   cursor: not-allowed;
 }
 
+/* ---- MCP tools toggle ------------------------------------------------- */
+.setting-item--mcp {
+  flex: 0 0 100%;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.mcp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.mcp-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.mcp-toggle.active {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mcp-toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-placeholder);
+  transition: background 0.12s;
+}
+
+.mcp-toggle.active .mcp-toggle-dot {
+  background: var(--accent);
+}
+
+/* ---- MCP tool-call rows in the transcript ---------------------------- */
+.message-tool {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0;
+}
+
+.tool-call {
+  width: 100%;
+  max-width: var(--max-w);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+
+.tool-call--running {
+  border-color: var(--accent);
+}
+
+.tool-call--error {
+  border-color: var(--error);
+  background: var(--error-bg);
+}
+
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tool-call-icon {
+  font-size: 12px;
+}
+
+.tool-call-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-light);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
+}
+
+.tool-call-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tool-call-args {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tool-call-result {
+  margin-top: 6px;
+}
+
+.tool-call-result summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.tool-call-result pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .setting-range {
   width: 100%;
   height: 4px;

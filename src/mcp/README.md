@@ -119,3 +119,72 @@ new GitHubMcpClient({ url: 'https://api.githubcopilot.com/mcp/x/repos' }); // si
 - **`Missing GitHub token`** — `GITHUB_PAT` is not set in `.env` (or not passed via `{ token }`).
 - **Empty / permission errors from a tool** — the PAT lacks the scope that tool requires; add the
   scope at [github.com/settings/tokens](https://github.com/settings/tokens).
+
+---
+
+# OMDb MCP Server
+
+A local [Model Context Protocol](https://modelcontextprotocol.io/) **server** built on top of the
+[OMDb API](https://www.omdbapi.com/). Unlike the GitHub client above (which talks to a remote
+server), this is our own server: the chat agent connects to it over **stdio** and calls its tools to
+search movies and fetch details — right from the chat UI.
+
+```
+Browser (UI toggle "OMDb MCP server on")
+  → POST /api/chat { useTools: true }
+    → Express agent: Claude with tools          ← agentic tool-use loop
+        ↕ stdio (MCP)
+      omdb-server.ts (child process)  → OMDb API (www.omdbapi.com)
+```
+
+## Setup
+
+1. **Get a free OMDb API key** at
+   [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx) (activate it via the email link).
+
+2. **Add it to your `.env`** at the project root:
+
+   ```env
+   OMDB_API_KEY=your_omdb_api_key_here
+   ```
+
+No extra dependencies — `@modelcontextprotocol/sdk` is already installed.
+
+## Using it from the chat UI
+
+1. Start the app: `pnpm dev` → open <http://localhost:3000>.
+2. Open **Settings** (gear icon) and turn **Tools → OMDb MCP server** on.
+3. Ask the agent something it needs OMDb for, e.g.:
+   - “Find movies about hackers”
+   - “What’s the plot of The Matrix (1999)?”
+
+   The agent calls the OMDb tools and each call appears as its own row in the transcript
+   (tool name, arguments, and a collapsible result). Turn the toggle off for a normal chat.
+
+## Tools
+
+| Tool            | Arguments                                              | OMDb mapping                |
+| --------------- | ------------------------------------------------------ | --------------------------- |
+| `search_movies` | `query` (required), `type?`, `year?`, `page?`          | `s`, `type`, `y`, `page`    |
+| `get_movie`     | `title?` **or** `imdbId?`, `year?`, `plot?`            | `t` / `i`, `y`, `plot`      |
+
+## Running the server standalone
+
+For debugging you can launch the server directly (it speaks JSON-RPC over stdio and waits for input):
+
+```bash
+pnpm mcp:omdb
+```
+
+## Files
+
+| File             | Purpose                                                              |
+| ---------------- | ------------------------------------------------------------------- |
+| `omdb-server.ts` | The MCP server: exposes `search_movies` / `get_movie` over stdio.   |
+| `omdb-client.ts` | Backend connector that spawns the server and is used by `/api/chat`. |
+
+## Troubleshooting
+
+- **`Missing OMDb API key`** — `OMDB_API_KEY` is not set in `.env`.
+- **`Invalid API key!` in a tool result** — the key is wrong or not yet activated (check the
+  activation email from OMDb).

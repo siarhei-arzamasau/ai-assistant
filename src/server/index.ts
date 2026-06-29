@@ -4,6 +4,27 @@ import Anthropic from '@anthropic-ai/sdk';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { getOmdbMcp } from '../mcp/omdb-client.js';
+
+/** Convert MCP tool definitions into the shape the Anthropic SDK expects. */
+function toAnthropicTools(tools: Tool[]): Anthropic.Tool[] {
+  return tools.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
+  }));
+}
+
+/** Flatten an MCP tool result's content blocks into a single text string. */
+function mcpResultToText(content: { type: string; text?: string }[]): string {
+  return content
+    .map(block => (block.type === 'text' && block.text !== undefined ? block.text : JSON.stringify(block)))
+    .join('\n');
+}
+
+/** Hard cap on tool-use round-trips to prevent a runaway agent loop. */
+const MAX_TOOL_ITERATIONS = 8;
 
 const app = express();
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
@@ -319,7 +340,7 @@ Respond with ONLY a JSON object — no markdown, no explanation.`,
 });
 
 app.post('/api/chat', async (req, res) => {
-  const { messages, settings = {}, system = '' } = req.body as { messages: ChatMessage[]; settings?: ChatSettings; system?: string };
+  const { messages, settings = {}, system = '', useTools = false } = req.body as { messages: ChatMessage[]; settings?: ChatSettings; system?: string; useTools?: boolean };
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'Invalid messages format' });
@@ -332,13 +353,13 @@ app.post('/api/chat', async (req, res) => {
   res.flushHeaders();
 
   let aborted = false;
-  let stream: ReturnType<typeof client.messages.stream> | undefined;
+  let currentStream: ReturnType<typeof client.messages.stream> | undefined;
   // When the client interrupts, it closes the fetch connection. Abort the
   // upstream Anthropic stream too so we stop generating (and billing) tokens
   // immediately instead of waiting for the next event to break the loop.
   res.on('close', () => {
     aborted = true;
-    if (stream && typeof stream.abort === 'function') stream.abort();
+    if (currentStream && typeof currentStream.abort === 'function') currentStream.abort();
   });
 
   // Keep the SSE connection alive while the model is thinking
@@ -351,7 +372,7 @@ app.post('/api/chat', async (req, res) => {
     const isOpus  = model === 'claude-opus-4-8';
     const isHaiku = model === 'claude-haiku-4-5-20251001';
 
-    console.log(`[chat] request — ${messages.length} message(s), model=${model}`);
+    console.log(`[chat] request — ${messages.length} message(s), model=${model}, tools=${useTools}`);
 
     const maxTokens = Math.min(Math.max(Math.round(settings.maxTokens ?? 16000), 1), 16000);
     // Opus: temperature deprecated — always use default (1). Others: honour the setting.
@@ -360,47 +381,100 @@ app.post('/api/chat', async (req, res) => {
     // Haiku doesn't support thinking. Others support it only at temperature === 1.
     const useThinking = !isHaiku && temperature === 1;
 
-    stream = client.messages.stream({
-      model,
-      max_tokens: maxTokens,
-      ...(system && { system }),
-      ...(useThinking && { thinking: { type: 'adaptive' } }),
-      ...(!isOpus && temperature !== 1 && { temperature }),
-      ...(stopSequences.length > 0 && { stop_sequences: stopSequences }),
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-    });
+    // When tools are enabled, connect to the OMDb MCP server and expose its
+    // tools to the model. The agent then runs a tool-use loop below.
+    let tools: Anthropic.Tool[] | undefined;
+    let mcp: Awaited<ReturnType<typeof getOmdbMcp>> | undefined;
+    if (useTools) {
+      mcp = await getOmdbMcp();
+      tools = toAnthropicTools(await mcp.listTools());
+    }
 
-    let thinking = false;
+    // The running conversation: user/assistant turns plus any tool_use /
+    // tool_result blocks appended across loop iterations.
+    const convo: Anthropic.MessageParam[] = messages.map(m => ({ role: m.role, content: m.content }));
+
     let inputTokens = 0;
     let outputTokens = 0;
 
-    for await (const event of stream) {
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS && !aborted; iteration++) {
+      currentStream = client.messages.stream({
+        model,
+        max_tokens: maxTokens,
+        ...(system && { system }),
+        ...(useThinking && { thinking: { type: 'adaptive' } }),
+        ...(!isOpus && temperature !== 1 && { temperature }),
+        ...(stopSequences.length > 0 && { stop_sequences: stopSequences }),
+        ...(tools && tools.length > 0 && { tools }),
+        messages: convo,
+      });
+
+      let thinking = false;
+
+      for await (const event of currentStream) {
+        if (aborted) break;
+
+        if (event.type === 'message_start') {
+          // input_tokens reflects the full context for this turn.
+          inputTokens = event.message.usage.input_tokens;
+        }
+
+        if (event.type === 'message_delta') {
+          outputTokens += event.usage.output_tokens;
+        }
+
+        if (event.type === 'content_block_start' && event.content_block.type === 'thinking') {
+          thinking = true;
+          res.write(`data: ${JSON.stringify({ thinking: true })}\n\n`);
+        }
+
+        if (event.type === 'content_block_start' && event.content_block.type === 'text' && thinking) {
+          thinking = false;
+          res.write(`data: ${JSON.stringify({ thinking: false })}\n\n`);
+        }
+
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta.type === 'text_delta'
+        ) {
+          res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+        }
+      }
+
       if (aborted) break;
 
-      if (event.type === 'message_start') {
-        inputTokens = event.message.usage.input_tokens;
+      const final = await currentStream.finalMessage();
+
+      // No tool calls requested — this turn is the model's final answer.
+      if (final.stop_reason !== 'tool_use' || !mcp) break;
+
+      const toolUses = final.content.filter(
+        (block: Anthropic.ContentBlock): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      );
+
+      // Preserve the full assistant turn (thinking + text + tool_use) — required
+      // when continuing a thinking-enabled conversation with tool results.
+      convo.push({ role: 'assistant', content: final.content });
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const toolUse of toolUses) {
+        if (aborted) break;
+        res.write(`data: ${JSON.stringify({ tool_use: { id: toolUse.id, name: toolUse.name, input: toolUse.input } })}\n\n`);
+
+        const result = await mcp.callTool(toolUse.name, toolUse.input as Record<string, unknown>);
+        const text = mcpResultToText(result.content);
+        res.write(`data: ${JSON.stringify({ tool_result: { id: toolUse.id, name: toolUse.name, content: text, isError: Boolean(result.isError) } })}\n\n`);
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: text,
+          ...(result.isError && { is_error: true }),
+        });
       }
 
-      if (event.type === 'message_delta') {
-        outputTokens = event.usage.output_tokens;
-      }
-
-      if (event.type === 'content_block_start' && event.content_block.type === 'thinking') {
-        thinking = true;
-        res.write(`data: ${JSON.stringify({ thinking: true })}\n\n`);
-      }
-
-      if (event.type === 'content_block_start' && event.content_block.type === 'text' && thinking) {
-        thinking = false;
-        res.write(`data: ${JSON.stringify({ thinking: false })}\n\n`);
-      }
-
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
-      }
+      if (aborted) break;
+      convo.push({ role: 'user', content: toolResults });
     }
 
     if (!aborted) {
