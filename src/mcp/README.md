@@ -130,10 +130,10 @@ server), this is our own server: the chat agent connects to it over **stdio** an
 search movies and fetch details — right from the chat UI.
 
 ```
-Browser (UI toggle "OMDb MCP server on")
-  → POST /api/chat { useTools: true }
+Browser (Settings → MCP tools → [OMDb])
+  → POST /api/chat { mcpServers: ["omdb"] }
     → Express agent: Claude with tools          ← agentic tool-use loop
-        ↕ stdio (MCP)
+        ↕ stdio (MCP), via the server registry
       omdb-server.ts (child process)  → OMDb API (www.omdbapi.com)
 ```
 
@@ -153,7 +153,7 @@ No extra dependencies — `@modelcontextprotocol/sdk` is already installed.
 ## Using it from the chat UI
 
 1. Start the app: `pnpm dev` → open <http://localhost:3000>.
-2. Open **Settings** (gear icon) and turn **Tools → OMDb MCP server** on.
+2. Open **Settings** (gear icon) and enable **MCP tools → OMDb**.
 3. Ask the agent something it needs OMDb for, e.g.:
    - “Find movies about hackers”
    - “What’s the plot of The Matrix (1999)?”
@@ -178,13 +178,105 @@ pnpm mcp:omdb
 
 ## Files
 
-| File             | Purpose                                                              |
-| ---------------- | ------------------------------------------------------------------- |
-| `omdb-server.ts` | The MCP server: exposes `search_movies` / `get_movie` over stdio.   |
-| `omdb-client.ts` | Backend connector that spawns the server and is used by `/api/chat`. |
+| File             | Purpose                                                           |
+| ---------------- | ----------------------------------------------------------------- |
+| `omdb-server.ts` | The MCP server: exposes `search_movies` / `get_movie` over stdio. |
+
+The backend connects to this server through the shared **server registry**
+(`registry.ts` + `stdio-client.ts`) — see [Connecting MCP servers to the agent](#connecting-mcp-servers-to-the-agent).
 
 ## Troubleshooting
 
 - **`Missing OMDb API key`** — `OMDB_API_KEY` is not set in `.env`.
 - **`Invalid API key!` in a tool result** — the key is wrong or not yet activated (check the
   activation email from OMDb).
+
+---
+
+# Weather MCP Server (scheduled)
+
+A local MCP **server** over the [weatherstack API](https://weatherstack.com/) with a built-in
+**scheduler**. Beyond one-off lookups it can run jobs on a schedule, persist results to JSON, and
+return aggregated summaries — covering deferred (reminders) and periodic (data collection) execution.
+
+```
+Browser (Settings → MCP tools → [Weather])
+  → POST /api/chat { mcpServers: ["weather"] }
+    → Express agent: Claude with tools
+        ↕ stdio (MCP), via the server registry
+      weather-server.ts (child process, lives as long as the backend)
+        ├─ scheduler (setTimeout chains) + JSON store under data/weather/
+        └─ weatherstack /current  (HTTP, free plan)
+```
+
+## Setup
+
+1. **Get a free weatherstack API key** at [weatherstack.com](https://weatherstack.com/).
+2. **Add it to your `.env`** at the project root:
+
+   ```env
+   WEATHERSTACK_API_KEY=your_weatherstack_api_key_here
+   ```
+
+## Using it from the chat UI
+
+1. `pnpm dev` → open <http://localhost:3000>, open **Settings**, enable **MCP tools → Weather**.
+2. Try, for example:
+   - “Collect the weather in London every 30 seconds, 3 times” → starts a periodic collection job
+     (intervals can be given in seconds and/or minutes).
+   - “Give me a weather summary” → returns the aggregated result.
+   - “Remind me in 2 minutes to take an umbrella” → schedules a one-off reminder;
+     “show my reminders” lists the ones that have fired.
+
+Scheduled jobs and collected data are written to `data/weather/` (gitignored) and **survive a backend
+restart** — active jobs are resumed on startup (overdue runs fire right away).
+
+## Tools
+
+| Tool                          | Arguments                                          | What it does                                   |
+| ----------------------------- | -------------------------------------------------- | ---------------------------------------------- |
+| `get_current_weather`         | `location`                                         | One-off current weather (not stored).          |
+| `schedule_weather_collection` | `location`, `intervalSeconds` and/or `intervalMinutes`, `maxRuns?` | Periodic snapshots into JSON; first one now. |
+| `schedule_reminder`           | `message`, `delaySeconds` and/or `delayMinutes`    | One-off deferred reminder.                     |
+| `list_jobs`                   | —                                                  | All jobs with status / run count / next run.   |
+| `cancel_job`                  | `jobId`                                            | Cancel an active job.                          |
+| `get_weather_summary`         | `jobId?`, `location?`                              | Aggregated result over collected observations. |
+| `list_due_reminders`          | —                                                  | Reminders that have already fired.             |
+
+> **Free-plan quota:** weatherstack’s free tier allows only ~100 calls/month and is HTTP-only. Prefer
+> large `intervalMinutes` and a small `maxRuns` so a collection job doesn’t exhaust your quota.
+
+## Running the server standalone
+
+```bash
+pnpm mcp:weather
+```
+
+## Files
+
+| File                  | Purpose                                                                      |
+| --------------------- | ---------------------------------------------------------------------------- |
+| `weather-server.ts`   | The MCP server: tools + scheduler + JSON persistence over stdio.             |
+| `weather-aggregate.ts`| Pure `aggregateObservations()` used for `get_weather_summary` (unit-tested). |
+
+## Troubleshooting
+
+- **`Missing weatherstack API key`** — `WEATHERSTACK_API_KEY` is not set in `.env`.
+- **Empty summaries** — no observations collected yet (the first snapshot is taken when the job
+  starts; subsequent ones follow `intervalMinutes`).
+
+---
+
+# Connecting MCP servers to the agent
+
+Both local servers above are wired into the chat agent through a small **registry**:
+
+| File              | Purpose                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `stdio-client.ts` | Generic `StdioMcpClient` — spawns a TS MCP server via `tsx` and talks over stdio.  |
+| `registry.ts`     | `MCP_SERVERS` map + lazy per-server singletons + `connectMcpServers(ids)`.         |
+
+`POST /api/chat` accepts `mcpServers: string[]` (server ids enabled via the Settings toggles). For
+each enabled id the registry connects the server, merges its tools, and routes each tool call back to
+the owning server. The agent runs a tool-use loop, streaming `tool_use` / `tool_result` events to the
+UI where each call is rendered as a `MCP · <server>` row.

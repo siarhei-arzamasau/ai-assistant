@@ -33,6 +33,13 @@ export const MODELS: { value: string; label: string }[] = [
   { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
 ];
 
+// MCP servers the agent can connect to. The `id` is sent to the backend in the
+// /api/chat request; the registry on the server resolves it to a real server.
+export const MCP_SERVERS: { id: string; label: string }[] = [
+  { id: 'omdb', label: 'OMDb' },
+  { id: 'weather', label: 'Weather' },
+];
+
 export const STRATEGIES: { value: string; label: string }[] = [
   { value: 'default', label: 'Default' },
   { value: 'sliding-window', label: 'Sliding Window' },

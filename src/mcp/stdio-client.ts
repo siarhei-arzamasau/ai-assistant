@@ -3,41 +3,37 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 
-export interface OmdbMcpClientOptions {
+export interface StdioMcpClientOptions {
   /** Client name reported to the server during initialization. */
-  name?: string;
+  name: string;
+  /** Path to the TypeScript server entry, relative to the project root. */
+  entry: string;
   /** Client version reported to the server during initialization. */
   version?: string;
 }
 
 /** Absolute path to the local `tsx` binary used to run the TypeScript server. */
 const TSX_BIN = path.join(process.cwd(), 'node_modules', '.bin', 'tsx');
-/** Path to the OMDb MCP server entry, relative to the project root. */
-const SERVER_ENTRY = path.join('src', 'mcp', 'omdb-server.ts');
 
 /**
- * A thin wrapper around the official MCP SDK `Client` that spawns the local
- * OMDb MCP server (`omdb-server.ts`) as a child process and talks to it over
- * stdio. The server reads `OMDB_API_KEY` from the inherited environment.
+ * A thin wrapper around the official MCP SDK `Client` that spawns a local
+ * TypeScript MCP server as a child process and talks to it over stdio. The
+ * server inherits the current environment (so API keys and `DATA_DIR` reach it).
  */
-export class OmdbMcpClient {
+export class StdioMcpClient {
   private readonly client: Client;
   private readonly transport: StdioClientTransport;
   private connected = false;
 
-  constructor(options: OmdbMcpClientOptions = {}) {
+  constructor(options: StdioMcpClientOptions) {
     this.transport = new StdioClientTransport({
       command: TSX_BIN,
-      args: [SERVER_ENTRY],
-      // Pass the current environment through so OMDB_API_KEY reaches the server.
+      args: [options.entry],
       env: process.env as Record<string, string>,
     });
 
     this.client = new Client(
-      {
-        name: options.name ?? 'omdb-mcp-client',
-        version: options.version ?? '1.0.0',
-      },
+      { name: options.name, version: options.version ?? '1.0.0' },
       { capabilities: {} },
     );
   }
@@ -49,7 +45,7 @@ export class OmdbMcpClient {
     this.connected = true;
   }
 
-  /** List every tool the OMDb MCP server exposes. */
+  /** List every tool the server exposes. */
   async listTools(): Promise<Tool[]> {
     this.assertConnected();
     const { tools } = await this.client.listTools();
@@ -77,33 +73,7 @@ export class OmdbMcpClient {
 
   private assertConnected(): void {
     if (!this.connected) {
-      throw new Error('OmdbMcpClient is not connected. Call connect() first.');
+      throw new Error('StdioMcpClient is not connected. Call connect() first.');
     }
   }
-}
-
-let singleton: OmdbMcpClient | null = null;
-let connecting: Promise<OmdbMcpClient> | null = null;
-
-/**
- * Lazily create and connect a shared OMDb MCP client. The child process and
- * connection are reused across requests; concurrent callers await the same
- * in-flight connection instead of spawning duplicate servers.
- */
-export async function getOmdbMcp(): Promise<OmdbMcpClient> {
-  if (singleton) return singleton;
-  if (!connecting) {
-    const client = new OmdbMcpClient();
-    connecting = client
-      .connect()
-      .then(() => {
-        singleton = client;
-        return client;
-      })
-      .catch((error) => {
-        connecting = null;
-        throw error;
-      });
-  }
-  return connecting;
 }

@@ -38,7 +38,7 @@ export interface Store {
   maxTokens: number;
   temperature: number;
   stopSequencesRaw: string;
-  mcpEnabled: boolean;         // expose the OMDb MCP server's tools to the agent
+  mcpServers: string[];        // ids of MCP servers whose tools are exposed to the agent
 
   // UI
   sidebarCollapsed: boolean;
@@ -76,7 +76,7 @@ function initialStore(): Store {
     maxTokens: 16000,
     temperature: 1,
     stopSequencesRaw: '',
-    mcpEnabled: false,
+    mcpServers: [],
     sidebarCollapsed: false,
     settingsOpen: false,
     memoryCollapsed: false,
@@ -101,7 +101,7 @@ export interface ChatActions {
   setStopSequences(raw: string): void;
   setSlidingWindowSize(n: number): void;
   setStrategy(strategy: string): void;
-  toggleMcp(): void;
+  toggleMcpServer(id: string): void;
   // sessions
   newChat(): void;
   openSession(id: string): Promise<void>;
@@ -314,7 +314,7 @@ export function useChat(): { s: Store; a: ChatActions } {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: apiMessages(), settings: buildSettings(), useTools: st.mcpEnabled, ...(system && { system }) }),
+          body: JSON.stringify({ messages: apiMessages(), settings: buildSettings(), mcpServers: st.mcpServers, ...(system && { system }) }),
           signal: controller.signal,
         });
 
@@ -340,7 +340,7 @@ export function useChat(): { s: Store; a: ChatActions } {
             let parsed: {
               text?: string; error?: string; thinking?: boolean;
               usage?: { input: number; output: number };
-              tool_use?: { id: string; name: string; input: unknown };
+              tool_use?: { id: string; name: string; input: unknown; server?: string };
               tool_result?: { id: string; name: string; content: string; isError: boolean };
             };
             try { parsed = JSON.parse(payload); } catch { continue; }
@@ -355,7 +355,7 @@ export function useChat(): { s: Store; a: ChatActions } {
               const liveIdx = st.transcript.indexOf(live);
               const insertAt = liveIdx === -1 ? st.transcript.length : liveIdx;
               st.transcript.splice(insertAt, 0, {
-                kind: 'tool', id: tu.id, name: tu.name, input: tu.input, status: 'running',
+                kind: 'tool', id: tu.id, name: tu.name, input: tu.input, status: 'running', server: tu.server,
               });
               live.thinking = false;
               render();
@@ -769,7 +769,13 @@ export function useChat(): { s: Store; a: ChatActions } {
       setStopSequences(raw) { s().stopSequencesRaw = raw; render(); },
       setSlidingWindowSize(n) { if (!isNaN(n) && n >= 1) { s().slidingWindowSize = n; render(); } },
       setStrategy(clicked) { const st = s(); st.strategy = st.strategy === clicked ? 'default' : clicked; render(); },
-      toggleMcp() { s().mcpEnabled = !s().mcpEnabled; render(); },
+      toggleMcpServer(id) {
+        const st = s();
+        st.mcpServers = st.mcpServers.includes(id)
+          ? st.mcpServers.filter(x => x !== id)
+          : [...st.mcpServers, id];
+        render();
+      },
       newChat,
       openSession,
       deleteSession,

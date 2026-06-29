@@ -4,17 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { getOmdbMcp } from '../mcp/omdb-client.js';
-
-/** Convert MCP tool definitions into the shape the Anthropic SDK expects. */
-function toAnthropicTools(tools: Tool[]): Anthropic.Tool[] {
-  return tools.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
-  }));
-}
+import { connectMcpServers } from '../mcp/registry.js';
 
 /** Flatten an MCP tool result's content blocks into a single text string. */
 function mcpResultToText(content: { type: string; text?: string }[]): string {
@@ -340,7 +330,7 @@ Respond with ONLY a JSON object — no markdown, no explanation.`,
 });
 
 app.post('/api/chat', async (req, res) => {
-  const { messages, settings = {}, system = '', useTools = false } = req.body as { messages: ChatMessage[]; settings?: ChatSettings; system?: string; useTools?: boolean };
+  const { messages, settings = {}, system = '', mcpServers = [] } = req.body as { messages: ChatMessage[]; settings?: ChatSettings; system?: string; mcpServers?: string[] };
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'Invalid messages format' });
@@ -372,7 +362,7 @@ app.post('/api/chat', async (req, res) => {
     const isOpus  = model === 'claude-opus-4-8';
     const isHaiku = model === 'claude-haiku-4-5-20251001';
 
-    console.log(`[chat] request — ${messages.length} message(s), model=${model}, tools=${useTools}`);
+    console.log(`[chat] request — ${messages.length} message(s), model=${model}, mcp=[${mcpServers.join(',')}]`);
 
     const maxTokens = Math.min(Math.max(Math.round(settings.maxTokens ?? 16000), 1), 16000);
     // Opus: temperature deprecated — always use default (1). Others: honour the setting.
@@ -381,13 +371,17 @@ app.post('/api/chat', async (req, res) => {
     // Haiku doesn't support thinking. Others support it only at temperature === 1.
     const useThinking = !isHaiku && temperature === 1;
 
-    // When tools are enabled, connect to the OMDb MCP server and expose its
-    // tools to the model. The agent then runs a tool-use loop below.
+    // When MCP servers are selected, connect to them and expose their tools to
+    // the model. The agent then runs a tool-use loop below, routing each call
+    // to the server that owns the tool.
     let tools: Anthropic.Tool[] | undefined;
-    let mcp: Awaited<ReturnType<typeof getOmdbMcp>> | undefined;
-    if (useTools) {
-      mcp = await getOmdbMcp();
-      tools = toAnthropicTools(await mcp.listTools());
+    let routeByTool: Awaited<ReturnType<typeof connectMcpServers>>['routeByTool'] | undefined;
+    if (mcpServers.length > 0) {
+      const toolset = await connectMcpServers(mcpServers);
+      if (toolset.tools.length > 0) {
+        tools = toolset.tools as Anthropic.Tool[];
+        routeByTool = toolset.routeByTool;
+      }
     }
 
     // The running conversation: user/assistant turns plus any tool_use /
@@ -446,7 +440,7 @@ app.post('/api/chat', async (req, res) => {
       const final = await currentStream.finalMessage();
 
       // No tool calls requested — this turn is the model's final answer.
-      if (final.stop_reason !== 'tool_use' || !mcp) break;
+      if (final.stop_reason !== 'tool_use' || !routeByTool) break;
 
       const toolUses = final.content.filter(
         (block: Anthropic.ContentBlock): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -459,17 +453,26 @@ app.post('/api/chat', async (req, res) => {
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const toolUse of toolUses) {
         if (aborted) break;
-        res.write(`data: ${JSON.stringify({ tool_use: { id: toolUse.id, name: toolUse.name, input: toolUse.input } })}\n\n`);
+        const route = routeByTool.get(toolUse.name);
+        res.write(`data: ${JSON.stringify({ tool_use: { id: toolUse.id, name: toolUse.name, input: toolUse.input, server: route?.serverLabel } })}\n\n`);
 
-        const result = await mcp.callTool(toolUse.name, toolUse.input as Record<string, unknown>);
-        const text = mcpResultToText(result.content);
-        res.write(`data: ${JSON.stringify({ tool_result: { id: toolUse.id, name: toolUse.name, content: text, isError: Boolean(result.isError) } })}\n\n`);
+        let text: string;
+        let isError = false;
+        if (!route) {
+          text = `No MCP server provides a tool named "${toolUse.name}".`;
+          isError = true;
+        } else {
+          const result = await route.client.callTool(toolUse.name, toolUse.input as Record<string, unknown>);
+          text = mcpResultToText(result.content);
+          isError = Boolean(result.isError);
+        }
+        res.write(`data: ${JSON.stringify({ tool_result: { id: toolUse.id, name: toolUse.name, content: text, isError } })}\n\n`);
 
         toolResults.push({
           type: 'tool_result',
           tool_use_id: toolUse.id,
           content: text,
-          ...(result.isError && { is_error: true }),
+          ...(isError && { is_error: true }),
         });
       }
 

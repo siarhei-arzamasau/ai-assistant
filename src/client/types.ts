@@ -74,6 +74,7 @@ export type DisplayItem =
       input: unknown;
       status: 'running' | 'done' | 'error';
       result?: string;
+      server?: string;       // human label of the MCP server that owns the tool
     };
 
 export interface CompareColumn {

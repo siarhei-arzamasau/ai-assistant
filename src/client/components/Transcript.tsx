@@ -40,7 +40,7 @@ function ToolRow({ item }: { item: Extract<DisplayItem, { kind: 'tool' }> }) {
       <div className={'tool-call tool-call--' + item.status}>
         <div className="tool-call-head">
           <span className="tool-call-icon">{icon}</span>
-          <span className="tool-call-badge">MCP · OMDb</span>
+          <span className="tool-call-badge">MCP{item.server ? ' · ' + item.server : ''}</span>
           <span className="tool-call-name">{item.name}</span>
           <code className="tool-call-args">{args}</code>
         </div>

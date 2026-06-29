@@ -1,5 +1,5 @@
 import type { Store, ChatActions } from '../useChat';
-import { MODELS, STRATEGIES } from '../constants';
+import { MCP_SERVERS, MODELS, STRATEGIES } from '../constants';
 
 export function SettingsPanel({ s, a }: { s: Store; a: ChatActions }) {
   const isOpus = s.model === 'claude-opus-4-8';
@@ -77,17 +77,25 @@ export function SettingsPanel({ s, a }: { s: Store; a: ChatActions }) {
           )}
         </div>
         <div className="setting-item setting-item--mcp">
-          <div className="setting-label-inline">Tools</div>
-          <button
-            className={'mcp-toggle' + (s.mcpEnabled ? ' active' : '')}
-            aria-pressed={s.mcpEnabled}
-            onClick={a.toggleMcp}
-          >
-            <span className="mcp-toggle-dot" />
-            OMDb MCP server {s.mcpEnabled ? 'on' : 'off'}
-          </button>
+          <div className="setting-label-inline">MCP tools</div>
+          <div className="mcp-toggles">
+            {MCP_SERVERS.map(server => {
+              const on = s.mcpServers.includes(server.id);
+              return (
+                <button
+                  key={server.id}
+                  className={'mcp-toggle' + (on ? ' active' : '')}
+                  aria-pressed={on}
+                  onClick={() => a.toggleMcpServer(server.id)}
+                >
+                  <span className="mcp-toggle-dot" />
+                  {server.label}
+                </button>
+              );
+            })}
+          </div>
           <div className="setting-hint setting-hint--below">
-            Lets the agent search movies &amp; fetch details via the OMDb MCP server
+            Connect MCP servers so the agent can use their tools (OMDb movies, weather collection &amp; reminders)
           </div>
         </div>
       </div>
